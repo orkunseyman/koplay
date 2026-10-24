@@ -1,8 +1,3 @@
-
-
-
-
-
 # KoPlay
 
 **Spotify on your e-reader.** A [KOReader](https://github.com/koreader/koreader) plugin that shows what's playing on Spotify, lets you skip and pause without leaving your book, and browse your playlists from the e-ink screen.
@@ -110,6 +105,10 @@ Strings live in [`koplay.koplugin/koplayl10n.lua`](koplay.koplugin/koplayl10n.lu
 ## Development
 
 `tools/emulator.sh` runs KoPlay in KOReader's macOS emulator at Paperwhite 3 resolution. Put `KOReader.app` from the [KOReader releases](https://github.com/koreader/koreader/releases) into `.emulator/` first. The plugin folder is symlinked, so restarting the emulator picks up your changes.
+
+## Support
+
+KoPlay is free and open source. If it makes your reading time better, you can support its development on [GitHub Sponsors](https://github.com/sponsors/orkunseyman).
 
 ## Disclaimer
 

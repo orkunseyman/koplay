@@ -4,6 +4,8 @@
 
 [English](README.md)
 
+https://github.com/user-attachments/assets/9ffb7b35-4c38-42ac-983f-aa501ccaa0cf
+
 <table>
   <tr>
     <td><img src="docs/screenshots/tr_nowplaying.png" alt="Şimdi çalan ekranı" width="260"></td>
@@ -103,6 +105,10 @@ Metinler [`koplay.koplugin/koplayl10n.lua`](koplay.koplugin/koplayl10n.lua) dosy
 ## Geliştirme
 
 `tools/emulator.sh` KoPlay'i KOReader'ın macOS emülatöründe Paperwhite 3 çözünürlüğünde çalıştırır. Önce [KOReader sürümlerinden](https://github.com/koreader/koreader/releases) indirdiğin `KOReader.app`'i `.emulator/` klasörüne koy. Eklenti klasörü sembolik bağlantıyla bağlı, emülatörü yeniden başlatınca değişikliklerin yüklenir.
+
+## Destek ol
+
+KoPlay ücretsiz ve açık kaynak. Okuma saatlerine bir şey kattıysa geliştirilmesini [GitHub Sponsors](https://github.com/sponsors/orkunseyman) üzerinden destekleyebilirsin.
 
 ## Not
 
