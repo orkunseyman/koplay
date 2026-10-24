@@ -1,8 +1,15 @@
+
+
+
+
+
 # KoPlay
 
 **Spotify on your e-reader.** A [KOReader](https://github.com/koreader/koreader) plugin that shows what's playing on Spotify, lets you skip and pause without leaving your book, and browse your playlists from the e-ink screen.
 
 [Türkçe](README.tr.md)
+
+https://github.com/user-attachments/assets/9ffb7b35-4c38-42ac-983f-aa501ccaa0cf
 
 <table>
   <tr>
