@@ -93,9 +93,10 @@ Your browser opens Spotify's consent page. Once you accept, the script writes `k
 
 ## Music tab (this fork)
 
-Inside a book, swipe up from the bottom of the screen to open KOReader's bottom menu. The last tab, the one with the music note, shows the current track and three buttons: Previous, Pause/Resume and Next.
+Inside a book, swipe up from the bottom of the screen to open KOReader's bottom menu. The last tab, the one with the music note, shows the current track and three buttons: previous, play/pause and next.
 
-- The track is fetched only when you open the tab and right after you press a button. Nothing runs in the background.
+- Tap the song name to open the now playing screen with the cover art.
+- The track is fetched when you open the tab, right after you press a button, and every refresh interval while the tab stays on screen, so songs changed on your phone show up. Nothing runs once the bottom menu is closed.
 - If Wi-Fi is off, the line says "No connection". A button press brings Wi-Fi up the same way KoPlay's gestures do.
 - Works in reflowable books (EPUB and similar) and in PDFs.
 - Turn it off in Tools → KoPlay → Settings → **Music tab in the bottom menu**.

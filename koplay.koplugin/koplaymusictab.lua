@@ -2,7 +2,8 @@
 "Music" tab in KOReader's bottom menu (swipe up inside a book): the current track on one line,
 and previous / play-pause / next buttons.
 
-No polling: the track is fetched only when the tab is shown and right after a button press.
+The track is fetched when the tab is shown, right after a button press, and every refresh interval
+while the tab stays on screen. Nothing runs once the bottom menu is closed or on another tab.
 The buttons work like KOReader's own font size decrease / increase buttons (font_fine_tune in
 creoptions.lua): `values = {}` stores nothing in the book's settings, so no button stays selected.
 --]]
@@ -18,17 +19,24 @@ local KoPlayMusicTab = {
     plugin = nil, -- the KoPlay object of the open book
 }
 
+-- FontAwesome step-backward / play / pause / step-forward (U+F048, F04B, F04C, F051), drawn from
+-- nerdfonts/symbols.ttf, which KOReader uses as a fallback for all UI text
+local PREV, PLAY, PAUSE, NEXT = "\239\129\136", "\239\129\139", "\239\129\140", "\239\129\145"
+
 local track_row = {
     name = "koplay_track",
     item_text = { "" },
     item_align_center = 1.0, -- no name column: the track line gets the full width
     item_font_size = 20,
     values = {}, -- so a long-press can't store anything either
+    args = { "open" }, -- a tap opens the now playing screen, with the cover art
+    event = "KoPlayMusicTab",
 }
 local button_row = {
     name = "koplay_buttons",
-    toggle = { "", "", "" },
+    toggle = { PREV, PLAY, NEXT },
     item_align_center = 1.0,
+    item_font_size = 22,
     height = 40, -- the default 30 is a small target on a 167 ppi screen
     values = {},
     args = { "previous", "toggle", "next" },
@@ -47,11 +55,13 @@ end
 local function refreshLabels(plugin)
     local s = plugin.menu_state
     track_row.item_text[1] = trackText(plugin)
-    button_row.toggle[1], button_row.toggle[3] = _("Previous"), _("Next")
-    button_row.toggle[2] = (s and not s.idle and s.is_playing) and _("Pause") or _("Resume")
+    button_row.toggle[2] = (s and not s.idle and s.is_playing) and PAUSE or PLAY
 end
 
+local function recheck() KoPlayMusicTab.fetchSoon(true) end
+
 --- After the panel has been painted with the cached text: fetch, and redraw if anything changed.
+-- While the tab stays on screen, it checks again every refresh interval (songs changed on the phone).
 function KoPlayMusicTab.fetchSoon(force)
     UIManager:tickAfterNext(function()
         local plugin = KoPlayMusicTab.plugin
@@ -64,6 +74,9 @@ function KoPlayMusicTab.fetchSoon(force)
             dialog:update()
             UIManager:setDirty(dialog, function() return "ui", dialog.dialog_frame.dimen end)
         end
+        -- one timer at most; once the menu is closed or on another tab, the check above ends the chain
+        UIManager:unschedule(recheck)
+        UIManager:scheduleIn(plugin:getInterval(), recheck)
     end)
 end
 
@@ -76,8 +89,16 @@ function track_row.show_func()
     return true
 end
 
---- A button was tapped. action: "previous", "toggle" or "next".
+--- A button was tapped. action: "previous", "toggle", "next", or "open" (the track line).
 function KoPlayMusicTab.onButton(plugin, action)
+    if action == "open" then
+        -- next tick: the bottom menu is still finishing this tap
+        UIManager:nextTick(function()
+            plugin.ui.config:onCloseConfigMenu()
+            plugin:onKoPlayNowPlaying()
+        end)
+        return true
+    end
     local s = plugin.menu_state
     if action == "toggle" and s and not s.idle then
         s.is_playing = not s.is_playing -- flip the label right away, the real state follows

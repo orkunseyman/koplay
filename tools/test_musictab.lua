@@ -14,6 +14,8 @@ local stubs = {
     ["ui/uimanager"] = {
         tickAfterNext = function(_self, fn) table.insert(ticks, fn) end,
         scheduleIn = function(_self, _s, fn) table.insert(ticks, fn) end,
+        nextTick = function(_self, fn) table.insert(ticks, fn) end,
+        unschedule = function(_self, fn) for i = #ticks, 1, -1 do if ticks[i] == fn then table.remove(ticks, i) end end end,
         setDirty = function() end,
     },
     util = { arrayContains = function(t, v) for i, x in ipairs(t) do if x == v then return i end end return false end },
@@ -28,6 +30,7 @@ local plugin = {
     menu_state = { title = "Song", artist = "Artist", is_playing = true },
     control = function(_self, action) table.insert(commands, action) end,
     refreshMenuState = function() end,
+    getInterval = function() return 10 end,
     errorLines = function(_self, err) return "error " .. err, "hint" end,
 }
 
@@ -42,10 +45,10 @@ assert(track_row.name and button_row.name and button_row.values and #button_row.
 
 -- Labels
 assert(track_row.show_func() == true)
-assert(track_row.item_text[1] == "Song · Artist" and button_row.toggle[2] == "Pause")
+assert(track_row.item_text[1] == "Song · Artist" and button_row.toggle[2] == "\239\129\140")
 plugin.menu_state = { idle = true }
 track_row.show_func()
-assert(track_row.item_text[1] == "Open Spotify on your phone" and button_row.toggle[2] == "Resume")
+assert(track_row.item_text[1] == "Open Spotify on your phone" and button_row.toggle[2] == "\239\129\139")
 plugin.menu_state = { idle = true, device = "Phone" }
 track_row.show_func()
 assert(track_row.item_text[1] == "Nothing playing")
@@ -60,6 +63,34 @@ assert(MusicTab.onButton(plugin, "toggle") == true)
 assert(plugin.menu_state.is_playing == false and commands[1] == "toggle")
 MusicTab.onButton(plugin, "next")
 assert(commands[2] == "next")
+
+-- Tapping the track line closes the bottom menu, then opens the now playing screen
+local steps = {}
+plugin.ui.config.onCloseConfigMenu = function() table.insert(steps, "close menu") end
+plugin.onKoPlayNowPlaying = function() table.insert(steps, "now playing") end
+ticks = {}
+assert(track_row.event == "KoPlayMusicTab" and track_row.args[1] == "open")
+assert(MusicTab.onButton(plugin, "open") == true and #steps == 0, "must wait for the menu to finish the tap")
+ticks[1]()
+assert(steps[1] == "close menu" and steps[2] == "now playing" and #commands == 2)
+
+-- While the tab is on screen it keeps checking, with one timer only; closing the menu ends it
+local fetches = 0
+plugin.refreshMenuState = function() fetches = fetches + 1 end
+plugin.ui.config.config_dialog = { config_options = cre, panel_index = 2, update = function() end, dialog_frame = {} }
+ticks = {}
+MusicTab.fetchSoon()
+ticks[1]()                      -- the fetch itself
+assert(fetches == 1 and #ticks == 2, "should schedule exactly one recheck")
+local recheck = ticks[2]
+MusicTab.fetchSoon()
+ticks[3]()                      -- a second fetch replaces the pending recheck, never adds one
+assert(fetches == 2 and #ticks == 3 and ticks[3] == recheck, "rechecks are stacking")
+plugin.ui.config.config_dialog = nil -- menu closed
+ticks = {}
+recheck()
+ticks[1]()
+assert(fetches == 2 and #ticks == 1, "kept checking after the menu closed")
 
 -- Turning it off removes it and moves the bottom menu off the missing tab
 settings.koplay_music_tab = false
