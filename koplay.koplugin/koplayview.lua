@@ -41,10 +41,7 @@ local function face(name, px)
     return Font:getFace(name, max(6, floor(px / scale + 0.5)))
 end
 
-local function formatTime(ms)
-    local s = floor((ms or 0) / 1000)
-    return string.format("%d:%02d", floor(s / 60), s % 60)
-end
+local formatTime = require("koplayapi").formatTime
 
 --- Draws text and returns its size. align: "left" (x is left edge), "center" (x is center), "right" (x is right edge)
 local function drawText(bb, text, fface, x, y, opts)

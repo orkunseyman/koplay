@@ -15,6 +15,8 @@ local _ = require("koplayl10n")
 
 local KoPlayApi = require("koplayapi")
 
+local formatTime = KoPlayApi.formatTime
+
 local KoPlayLibrary = {}
 
 function KoPlayLibrary:new(o)
@@ -22,11 +24,6 @@ function KoPlayLibrary:new(o)
     setmetatable(o, self)
     self.__index = self
     return o
-end
-
-local function formatTime(ms)
-    local s = math.floor((ms or 0) / 1000)
-    return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
 --- Runs fn while showing a "loading" message (network calls block the UI).
@@ -115,7 +112,7 @@ end
 --- Menu item for a track. play_what() returns the play request for a tap.
 function KoPlayLibrary:trackItem(track, play_what)
     return {
-        text = track.artist ~= "" and (track.title .. " — " .. track.artist) or track.title,
+        text = KoPlayApi.label(track),
         mandatory = track.duration_ms > 0 and formatTime(track.duration_ms) or nil,
         callback = function() self:play(play_what()) end,
         hold_callback = function()
@@ -242,11 +239,11 @@ function KoPlayLibrary:openQueue()
     if not q then return self:showError(err) end
     local items = {}
     if q.current then
-        table.insert(items, { text = "▶ " .. q.current.title .. " — " .. q.current.artist, select_enabled = false })
+        table.insert(items, { text = "▶ " .. KoPlayApi.label(q.current), select_enabled = false })
     end
     for _i, track in ipairs(q.items) do
         table.insert(items, {
-            text = track.artist ~= "" and (track.title .. " — " .. track.artist) or track.title,
+            text = KoPlayApi.label(track),
             mandatory = formatTime(track.duration_ms),
             select_enabled = false,
         })

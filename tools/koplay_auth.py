@@ -118,6 +118,7 @@ def main():
         sys.exit(f"Unexpected response: {tokens}")
 
     OUT_FILE.write_text(json.dumps({"client_id": client_id, "refresh_token": tokens["refresh_token"]}))
+    OUT_FILE.chmod(0o600)  # the refresh token is a secret
     print(f"Saved: {OUT_FILE}")
 
     if KINDLE_SETTINGS.is_dir():

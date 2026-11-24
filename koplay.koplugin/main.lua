@@ -127,8 +127,7 @@ function KoPlay:addToMainMenu(menu_items)
                     text_func = function()
                         local s = self.menu_state
                         if s and not s.idle then
-                            local track = s.artist ~= "" and (s.title .. " — " .. s.artist) or s.title
-                            return T(_("Now playing: %1"), track)
+                            return T(_("Now playing: %1"), KoPlayApi.label(s))
                         end
                         return _("Now playing")
                     end,
@@ -273,8 +272,7 @@ function KoPlay:toastCurrentTrack()
     if state.idle then
         return self:toast(_("Nothing playing right now"))
     end
-    local text = "♪ " .. state.title
-    if state.artist ~= "" then text = text .. " — " .. state.artist end
+    local text = "♪ " .. KoPlayApi.label(state)
     if not state.is_playing then text = _("Paused") .. ": " .. text end
     self:toast(text)
 end
@@ -296,7 +294,6 @@ end
 
 function KoPlay:loadCover(url)
     if url == self.cover_url then return false end
-    self.cover_url = url
     local size = self.view:getCoverSize()
     local image
     if url and size > 0 then
@@ -306,6 +303,9 @@ function KoPlay:loadCover(url)
             image = ImageWidget:new{ image = bb, width = size, height = size, image_disposable = true }
         end
     end
+    -- remember the url only once it worked, so a failed download is retried next poll
+    if image or not url then self.cover_url = url end
+    if not image and not self.view.cover then return false end -- placeholder already showing
     self.view:setCover(image)
     return true
 end
@@ -372,8 +372,8 @@ function KoPlay:startPlayback(fn, on_success, open_view)
     if ok then return done() end
     if err ~= "no_device" then return fail(err) end
 
-    local devices = KoPlayApi:getDevices()
-    if not devices or #devices == 0 then return fail("no_device") end
+    local devices, devices_err = KoPlayApi:getDevices()
+    if not devices or #devices == 0 then return fail(devices_err or "no_device") end
     local function tryOn(device)
         local ok2, err2 = fn(device.id)
         if ok2 then return done() end

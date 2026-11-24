@@ -19,7 +19,6 @@ local TOKEN_URL = "https://accounts.spotify.com/api/token"
 
 local KoPlayApi = {
     auth_file = DataStorage:getSettingsDir() .. "/koplay.json",
-    legacy_auth_file = DataStorage:getSettingsDir() .. "/spotify.json", -- from before the rename
     auth = nil,          -- { client_id, refresh_token }
     access_token = nil,
     token_expires = 0,   -- os.time() after which access_token is stale
@@ -51,31 +50,25 @@ end
 
 function KoPlayApi:loadAuth()
     local data = readJson(self.auth_file)
-    local migrated = false
-    if not data then
-        data = readJson(self.legacy_auth_file)
-        migrated = data ~= nil
-    end
     if data and str(data.client_id) and str(data.refresh_token) then
         self.auth = data
-        if migrated then
-            self:saveAuth()
-            os.remove(self.legacy_auth_file)
-        end
         return true
     end
     logger.warn("KoPlay: no valid auth file", self.auth_file)
     return false
 end
 
+-- Write to a temp file and rename, so a crash mid-write can't leave koplay.json empty.
 function KoPlayApi:saveAuth()
-    local f = io.open(self.auth_file, "w")
-    if not f then
+    local tmp = self.auth_file .. ".tmp"
+    local f = io.open(tmp, "w")
+    local ok = f and f:write(JSON.encode(self.auth)) and f:close()
+    if not ok or not os.rename(tmp, self.auth_file) then
         logger.warn("KoPlay: cannot write", self.auth_file)
-        return
+        os.remove(tmp)
+        return false
     end
-    f:write(JSON.encode(self.auth))
-    f:close()
+    return true
 end
 
 function KoPlayApi:hasAuth()
@@ -86,7 +79,8 @@ end
 -- @treturn int|nil HTTP status code (nil on network error)
 -- @treturn string response body (or error message)
 -- @treturn table response headers
-function KoPlayApi:request(method, url, headers, body)
+-- large: use the long timeouts (cover art); API calls stay short since they block the UI.
+function KoPlayApi:request(method, url, headers, body, large)
     local sink = {}
     headers = headers or {}
     if body then
@@ -95,7 +89,11 @@ function KoPlayApi:request(method, url, headers, body)
         -- Spotify answers 411 to body-less PUT/POST without it
         headers["Content-Length"] = "0"
     end
-    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    if large then
+        socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    else
+        socketutil:set_timeout(5, 10)
+    end
     local code, resp_headers, status = socket.skip(1, http.request{
         method = method,
         url = url,
@@ -122,6 +120,8 @@ function KoPlayApi:refreshAccessToken()
     if code ~= 200 then
         logger.warn("KoPlay: token refresh failed", code, content)
         if code == 400 or code == 401 then
+            -- forget it, so a freshly copied koplay.json is read on the next call
+            self.auth, self.access_token = nil, nil
             return false, "auth_revoked"
         end
         return false, "network"
@@ -172,7 +172,6 @@ function KoPlayApi:call(method, path, body)
             return code, content
         end
     end
-    return nil, "auth_revoked"
 end
 
 --- GET returning decoded JSON on 200, or nil plus an error kind.
@@ -222,6 +221,16 @@ function KoPlayApi.track(item)
         artist = item.type == "episode" and isTable(item.show) and str(item.show.name) or artistNames(item.artists),
         duration_ms = tonumber(item.duration_ms) or 0,
     }
+end
+
+--- "Title — Artist", or just the title when there's no artist.
+function KoPlayApi.label(t)
+    return t.artist ~= "" and (t.title .. " — " .. t.artist) or t.title
+end
+
+function KoPlayApi.formatTime(ms)
+    local s = math.floor((ms or 0) / 1000)
+    return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
 --- Fetches the current playback state, normalized.
@@ -361,7 +370,8 @@ end
 function KoPlayApi:getRecentlyPlayed()
     local data, err = self:get("/me/player/recently-played?limit=50")
     if not data then return nil, err end
-    return page(data, 0, function(e)
+    -- its `next` is a time cursor, not an offset: show one page, no "Load more"
+    return page({ items = data.items }, 0, function(e)
         return isTable(e) and KoPlayApi.track(e.track)
     end)
 end
@@ -402,7 +412,7 @@ function KoPlayApi:search(query)
 end
 
 function KoPlayApi:download(url)
-    local code, content = self:request("GET", url)
+    local code, content = self:request("GET", url, nil, nil, true)
     if code == 200 and content and #content > 0 then
         return content
     end

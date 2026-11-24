@@ -3,7 +3,7 @@
 # (536x724 points = 1072x1448 pixels on a Retina screen, 300 dpi).
 #
 # The plugin is symlinked, so code changes show up after restarting the emulator.
-# The emulator shares tools/koplay.json, so it uses the same Spotify login.
+# The emulator starts from a copy of tools/koplay.json, so it uses the same Spotify login.
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,7 +23,8 @@ fi
 
 mkdir -p "$HOME_DIR/plugins" "$HOME_DIR/settings"
 ln -sfn "$ROOT/koplay.koplugin" "$HOME_DIR/plugins/koplay.koplugin"
-ln -sfn "$ROOT/tools/koplay.json" "$HOME_DIR/settings/koplay.json"
+# copied once, not linked: KoPlay replaces the file when Spotify rotates the token
+[ -e "$HOME_DIR/settings/koplay.json" ] || cp "$ROOT/tools/koplay.json" "$HOME_DIR/settings/koplay.json"
 
 KO_HOME="$HOME_DIR" \
 EMULATE_READER_W=536 EMULATE_READER_H=724 EMULATE_READER_DPI=300 \
