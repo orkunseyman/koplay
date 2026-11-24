@@ -79,8 +79,13 @@ Key points:
   the old UI and its KoPlay object and makes a new one. Checked in KOReader's source: ReaderUI
   creates every plugin with `PluginLoader:createPluginInstance` and stores it with
   `registerModule("koplay", ...)`, so inside a book the plugin is also reachable as `self.ui.koplay`
-  (`readerui.lua:94`, `:464`). So `self.view`,
-  `self.state` and `self.menu_state` reset. The Spotify client lives in a module (`koplayapi.lua`),
+  (`readerui.lua:94`, `:464`). So `self.now_playing`,
+  `self.state` and `self.menu_state` reset.
+- **KOReader also hands every plugin some fields:** `ui`, `document`, `dialog` and, inside a book,
+  `view` (KOReader's own page view, `readerui.lua:467`). A plugin must not use these names for
+  its own things. Original KoPlay kept its now playing screen in `self.view`, so inside a book
+  it always thought that screen was open: play/pause only ever sent "play", and the now playing
+  screen wouldn't open. This fork renamed it to `self.now_playing`. The Spotify client lives in a module (`koplayapi.lua`),
   and modules are loaded only once, so the access token survives the switch. See section 8.
 - **Events** are found by name. KOReader passes an event down through its widgets, and any object
   with a method called `on` + the event name gets it. Event `KoPlayToggle` calls `onKoPlayToggle`.
