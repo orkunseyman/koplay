@@ -6,7 +6,8 @@ Line numbers point at the current working tree. That tree includes the audit fix
 fork, which are not committed yet. If you check out a different version, the numbers shift a little.
 
 Things marked *(KOReader convention)* describe how KOReader behaves, based on how plugins are
-normally written. Phase 2 checks KOReader's own source, and this file gets corrected if needed.
+normally written, and have not been checked in KOReader's source yet. Section 11 is based on
+KOReader's source, commit `55471ca` (23 Nov 2026).
 
 ---
 
@@ -75,7 +76,10 @@ Key points:
 - `KoPlay = WidgetContainer:extend{ name = "koplay", is_doc_only = false }` (`main.lua:41`).
   `is_doc_only = false` means the plugin also loads in the file browser, not only inside a book.
 - **There is one KoPlay object per screen.** Moving from the file browser into a book throws away
-  the old UI and its KoPlay object and makes a new one *(KOReader convention)*. So `self.view`,
+  the old UI and its KoPlay object and makes a new one. Checked in KOReader's source: ReaderUI
+  creates every plugin with `PluginLoader:createPluginInstance` and stores it with
+  `registerModule("koplay", ...)`, so inside a book the plugin is also reachable as `self.ui.koplay`
+  (`readerui.lua:94`, `:464`). So `self.view`,
   `self.state` and `self.menu_state` reset. The Spotify client lives in a module (`koplayapi.lua`),
   and modules are loaded only once, so the access token survives the switch. See section 8.
 - **Events** are found by name. KOReader passes an event down through its widgets, and any object
@@ -535,3 +539,195 @@ Other risks:
 - **Library rows.** "Title, artist" plus the duration on the right get cut off quickly at 600 px.
   This is KOReader's `Menu` behavior, not KoPlay's.
 - **Not verified on a real 600x800 screen.** These numbers are computed from the code, not measured.
+
+---
+
+## 11. How KOReader's bottom menu is built
+
+Files read (KOReader commit `55471ca`): `frontend/ui/widget/configdialog.lua`,
+`frontend/apps/reader/modules/readerconfig.lua`, `frontend/ui/data/creoptions.lua`,
+`frontend/ui/data/koptoptions.lua`. Also, where they lead: `toggleswitch.lua`, `configurable.lua`,
+`iconwidget.lua`, `readerui.lua`, `readercoptlistener.lua`, `readerkoptlistener.lua`, `userpatch.lua`.
+
+The bottom menu only exists inside a book. The file browser has none.
+
+### The pieces
+
+```
+ReaderUI (one per open book)
+ |-- ReaderConfig  (self.ui.config)                         readerconfig.lua
+ |     options = CreOptions  (EPUB, FB2...: prefix "copt")  picked in init, readerconfig.lua:14
+ |            or KoptOptions (PDF, DjVu:    prefix "kopt")
+ |     swipe up / tap bottom -> onShowConfigMenu()           readerconfig.lua:133
+ |        builds a NEW ConfigDialog every time it opens
+ |
+ `-- ConfigDialog                                           configdialog.lua:863
+       +--------------------------------------+
+       |  ConfigPanel: the options of one tab |   ConfigOption:init, configdialog.lua:187
+       |   name on the left | widget on right |
+       |   name on the left | widget on right |
+       +--------------------------------------+
+       |  MenuBar: one icon per tab            |   MenuBar:init, configdialog.lua:733
+       +--------------------------------------+
+```
+
+### The data: a list of tabs, each a list of options
+
+```lua
+CreOptions = {
+    prefix = "copt",
+    {   icon = "appbar.rotation", options = { {...}, {...} } },   -- tab 1
+    {   icon = "appbar.textsize", options = { {...}, {...} } },   -- tab 4
+    ...
+}
+```
+
+`CreOptions` and `KoptOptions` are plain modules, so every book shares the same two tables.
+Anything a plugin adds to them shows up the next time the menu opens.
+
+The option fields that matter for the Music tab:
+
+| Field | What it does | Where |
+|---|---|---|
+| `name` | **Required.** Key used to store the value. `loadDefaults` joins `prefix .. "_" .. name`, so a missing name crashes | `configurable.lua` |
+| `name_text` / `name_text_func(configurable, document)` | label on the left; the func is called each time the panel is built (twice: once to measure, once to draw) | `configdialog.lua:223`, `:284` |
+| `toggle` | a row of boxed buttons (ToggleSwitch) | `configdialog.lua:545` |
+| `values` | values to store; a ToggleSwitch **needs** this table, even empty, or it crashes on `#self.values` | `toggleswitch.lua` |
+| `event` + `args` | event to send on tap, with `args[position]` as its argument | `configdialog.lua:1014` |
+| `show_func` / `enabled_func` | hide or grey out an option | `configdialog.lua:257`, `:278` |
+| `height` | row height, and the toggle's height (default 30 for a toggle row) | `configdialog.lua:267`, `:550` |
+
+### Your understanding, checked
+
+1. **"Bottom menu tabs are lists of options."** Correct. See above.
+2. **"Options support `name_text_func` for dynamic text."** Correct, with one catch: it is not
+   live. It runs only when the panel is built: when the menu opens, when you switch tabs, and after
+   any tap on an option (`onConfigChoose` calls `self:update()`, which rebuilds the panel). To show
+   new text later, for example after a network fetch, the code has to call
+   `config_dialog:update()` and then `UIManager:setDirty(config_dialog, ...)` itself.
+3. **"Toggle buttons can fire an event that `onConfigChoose` sends through `ui:handleEvent`."**
+   Correct. The full path:
+
+```
+tap on a toggle button
+  -> ToggleSwitch:onTapSelect                      toggleswitch.lua
+       highlights the tapped button
+       -> ConfigDialog:onConfigChoose(values, name, event, args, position)   configdialog.lua:991
+            (waits one tick: UIManager:tickAfterNext)
+            if values:  onConfigChoice(name, values[position])
+                          -> ui:handleEvent("ConfigChange", name, value)
+                          -> ReaderCoptListener / ReaderKoptListener:onConfigChange
+                               document.configurable[name] = value   <- this is what gets SAVED
+            if event:   onConfigEvent(event, args[position])
+                          -> ui:handleEvent(Event:new(event, arg))
+                          -> any module with on<event>, e.g. KoPlay:onKoPlayMusic("next")
+            self:update()   rebuilds the panel, name_text_func runs again
+```
+
+### What gets saved into the book, and how to avoid it
+
+- When a book closes, `ReaderConfig:onSaveSettings` (`readerconfig.lua:197`) calls
+  `Configurable:saveSettings`. That writes **every number, string or table** in `configurable`
+  into the book's `.sdr` settings file as `copt_<name>` or `kopt_<name>`.
+- When a book opens, `loadDefaults` sets `configurable[name] = G_reader_settings "copt_<name>" or
+  default_value`.
+
+So the trick is the one KOReader already uses for its own **Font size decrease / increase** buttons
+(`font_fine_tune`, `creoptions.lua:430`): `values = {}`, plus an `event` and `args`.
+`values[position]` is then `nil`, `configurable[name]` stays `nil`, and nothing is saved.
+
+**Highlight:** the tapped button turns black. The panel rebuild right after finds no stored value
+(`current_item` is `nil`, `configdialog.lua:340`), so the button draws white again. It does not stay
+highlighted.
+
+Side effects of `values = {}` to know about:
+
+- On PDFs, `ReaderKoptListener:onConfigChange` repaints the whole screen ("partial" refresh) on
+  every press. That is a little extra flicker.
+- On a Kindle, the ConfigChange handlers also fire `StartActivityIndicator`. That only shows the
+  Kindle spinner for PDFs in reflow mode (`text_wrap == 1`), and it stops at the next page draw.
+- **Long-press** on a toggle opens "Set default ... to ...?" (`onMakeDefault`,
+  `configdialog.lua:1391`). KOReader skips this only for the name `font_fine_tune`. For us,
+  accepting it would store `nil`, which is harmless but confusing.
+
+### Other facts the Music tab must respect
+
+- **Tab index is saved per book.** `last_panel_index` goes into the book's settings as
+  `config_panel_index`, and on open it is capped at the number of tabs (`readerconfig.lua:188`).
+  So add the Music tab **at the end**. Removing it while the menu is set to reopen on it must also
+  lower `ui.config.last_panel_index`, or the next open asks for a tab that no longer exists and crashes.
+- **Insert once.** The KoPlay object is created again for every book, but the option tables are
+  shared. Adding the tab must check that it is not already there.
+- **Icons are looked up by name** in `koreader/icons/` (your own icons), then
+  `resources/icons/mdlight/`, then fallbacks (`iconwidget.lua:20`). KOReader has **no music icon**.
+  A missing name shows `icon-not-found.svg` instead of crashing.
+- **Network calls block the screen**, so "show cached text first, then update" means:
+  `name_text_func` returns the cached text right away, and the fetch runs a moment later
+  (`UIManager:scheduleIn`), followed by `config_dialog:update()`.
+
+### Fit on 600x800
+
+KOReader sizes are designed around a 600 px wide screen, so on your Kindle `scaleBySize` is close
+to 1:1. Rough numbers:
+
+- Tab bar: icons are 40 px. Reflowable books have 6 tabs and PDFs have 7, so 7 or 8 with Music:
+  about 330 to 370 px of 600. It fits.
+- Option names take 25% to 50% of the width (150 to 300 px) and are cut beyond that. A long
+  "Song · Artist" as the name of the button row would be cut at about 300 px, so the track line is
+  better as its own full width row.
+- A toggle row is 30 px tall by default, about 4.5 mm on your screen. That is small for a finger,
+  so the button row should set a taller `height`.
+
+---
+
+## 12. Two ways to add the Music tab
+
+### Option A: from the plugin (a new file in koplay.koplugin)
+
+`koplay.koplugin/koplaymusictab.lua` holds the whole feature. `main.lua` gets a few lines:
+one call in `init` (only inside a book, when `self.ui.config` exists), one event handler that
+forwards the button to `self:control(action)`, and one on/off item in the KoPlay settings menu.
+
+```
+KoPlay:init  ->  MusicTab.install(self)   adds the tab to CreOptions / KoptOptions once
+button tap   ->  ui:handleEvent("KoPlayMusic", "next")  ->  KoPlay:onKoPlayMusic  ->  self:control("next")
+menu opens   ->  name_text_func -> cached text now, fetch shortly after -> config_dialog:update()
+```
+
+Pros:
+- One folder to copy to the Kindle, same as today.
+- Calls KoPlay's own `control()`, `KoPlayApi:getPlayback`, `errorLines`, Wi-Fi handling and device
+  picker directly. Nothing is duplicated.
+- The on/off setting sits naturally in the KoPlay menu, and turning the plugin off removes the tab too.
+- Testable in the emulator like the rest of the plugin.
+
+Cons:
+- Touches `main.lua` (about 8 lines). Merging upstream changes to `main.lua` may need a small manual fix.
+- Changes KOReader's shared option tables at runtime. A future KOReader change to the option format
+  would break it (Option B has the same risk).
+
+### Option B: a user patch (koreader/patches/2-koplay-music-tab.lua)
+
+KOReader runs every `koreader/patches/2-*.lua` file after startup (`userpatch.lua`, "late"
+priority). The patch appends the tab to both option tables and, on a button press, reaches the
+plugin through `ui.koplay`.
+
+Pros:
+- Zero changes to KoPlay's files. Upstream merges never conflict.
+- It's KOReader's official mechanism for UI tweaks.
+
+Cons:
+- Two things to install and keep in sync: the plugin folder and the patch file.
+- The patch depends on KoPlay's internal names (`ui.koplay`, `control`, `koplayapi`) without
+  KoPlay knowing it exists. An upstream rename breaks it silently.
+- The patch runs before plugins load, so it can't `require("koplayapi")` at startup. It must wait
+  until a button is tapped.
+- The on/off setting in the KoPlay menu needs a change to `main.lua` anyway, or more patching of
+  KoPlay's menu code from outside.
+- Patches can be turned off globally in KOReader (`.patches_disabled`), which also hides the tab.
+
+### Recommendation
+
+**Option A.** The "setting in the KoPlay menu" requirement already means touching `main.lua`, and
+then B's main advantage is gone. A keeps everything in one folder, and the `main.lua` diff stays
+around 8 lines.
