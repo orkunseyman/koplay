@@ -23,6 +23,7 @@ local _ = require("koplayl10n")
 
 local KoPlayApi = require("koplayapi")
 local KoPlayLibrary = require("koplaylibrary")
+local KoPlayMusicTab = require("koplaymusictab")
 local KoPlayView = require("koplayview")
 
 local IDLE_INTERVAL = 30 -- seconds between polls when paused / nothing playing
@@ -68,7 +69,10 @@ end
 function KoPlay:init()
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
+    KoPlayMusicTab.install(self)
 end
+
+function KoPlay:onKoPlayMusicTab(action) return KoPlayMusicTab.onButton(self, action) end
 
 function KoPlay:getInterval()
     return G_reader_settings:readSetting("koplay_poll_interval", 10)
@@ -91,6 +95,14 @@ function KoPlay:addToMainMenu(menu_items)
             text = _("Keep screen awake while open"),
             checked_func = function() return G_reader_settings:nilOrTrue("koplay_keep_awake") end,
             callback = function() G_reader_settings:flipNilOrTrue("koplay_keep_awake") end,
+        },
+        {
+            text = _("Music tab in the bottom menu"),
+            checked_func = function() return G_reader_settings:nilOrTrue("koplay_music_tab") end,
+            callback = function()
+                G_reader_settings:flipNilOrTrue("koplay_music_tab")
+                KoPlayMusicTab.apply(self)
+            end,
         },
     }
     local function libraryItem(text, open)
@@ -158,8 +170,11 @@ end
 -- (the menu may build its items more than once, e.g. for menu search).
 function KoPlay:refreshMenuState(force)
     if not force and self.menu_state_at and os.time() - self.menu_state_at < 5 then return end
-    if not KoPlayApi:hasAuth() or not NetworkMgr:isOnline() then return end
-    self.menu_state = KoPlayApi:getPlayback(0) or self.menu_state
+    -- menu_error: why the last refresh failed, nil when it worked (shown by the Music tab)
+    if not KoPlayApi:hasAuth() then self.menu_error = "no_auth" return end
+    if not NetworkMgr:isOnline() then self.menu_error = "network" return end
+    local state, err = KoPlayApi:getPlayback(0)
+    self.menu_state, self.menu_error = state or self.menu_state, err
     self.menu_state_at = os.time()
 end
 
@@ -335,7 +350,7 @@ function KoPlay:poll()
     local track_changed = not self.state or self.state.id ~= state.id or (self.state.idle ~= state.idle)
     local cover_changed = self:loadCover(not state.idle and state.cover_url or nil)
     self.state = state
-    self.menu_state, self.menu_state_at = state, os.time()
+    self.menu_state, self.menu_state_at, self.menu_error = state, os.time(), nil
     self.view:update{ state = state }
     -- A full (flashing) refresh only when the picture changes, to clear e-ink ghosting
     self.view:refresh(track_changed or cover_changed)
